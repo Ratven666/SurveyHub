@@ -9,8 +9,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Импортируем Base (без моделей внутри base.py)
 from app.db.base import Base
-from app.models import Group, Student, Subject, LabWork, group_subject_association
+
+# Импортируем __init__.py, который регистрирует ВСЕ модели в Base.metadata
+import app.models  # noqa: F401
 
 target_metadata = Base.metadata
 

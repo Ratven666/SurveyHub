@@ -3,6 +3,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
+import enum
+from sqlalchemy import Enum as SAEnum
+
+class LabReportStatus(enum.Enum):
+    pending = "pending"
+    submitted = "submitted"
+    accepted = "accepted"
+
 class LabRegistration(Base):
     __tablename__ = "lab_registrations"
 
