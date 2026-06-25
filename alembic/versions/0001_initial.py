@@ -36,7 +36,6 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("training_direction", sa.String(255), nullable=True),
         sa.PrimaryKeyConstraint("id"),
-        # name НЕ уникален сам по себе — уникален набор (name, description, direction)
         sa.UniqueConstraint(
             "name", "description", "training_direction",
             name="uq_subject_name_description_direction",
@@ -148,9 +147,13 @@ def upgrade() -> None:
         sa.Column("order_number", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("min_students", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("max_students", sa.Integer(), nullable=False, server_default="1"),
+        # ✅ НОВОЕ: часы на выполнение лабораторной
+        sa.Column("hours_to_complete", sa.Integer(), nullable=False, server_default="2",
+                  comment="Количество часов, отведённых на выполнение лабораторной работы"),
         sa.Column("subject_id", sa.Integer(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["subject_id"], ["subjects.id"], ondelete="CASCADE"),
+        # ✅ НОВОЕ: уникальность (предмет, порядковый номер)
         sa.UniqueConstraint(
             "subject_id", "order_number",
             name="uq_lab_work_subject_order",
@@ -166,6 +169,11 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "max_students >= min_students",
             name="ck_lab_works_max_gte_min",
+        ),
+        # ✅ НОВОЕ: часы должны быть положительными
+        sa.CheckConstraint(
+            "hours_to_complete >= 1",
+            name="ck_lab_works_hours_positive",
         ),
     )
 
@@ -308,7 +316,6 @@ def upgrade() -> None:
             ["lab_registrations.id"],
             ondelete="CASCADE",
         ),
-        # один отчёт на одну запись о лабораторной
         sa.UniqueConstraint(
             "lab_registration_id",
             name="uq_lab_reports_lab_registration_id",

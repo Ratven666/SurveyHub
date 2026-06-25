@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -20,10 +20,17 @@ class LabWork(Base):
         Integer, nullable=False, default=1, server_default="1"
     )
 
+    hours_to_complete: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default="2",
+        comment="Количество часов, отведённых на выполнение лабораторной работы"
+    )
+
     __table_args__ = (
         CheckConstraint("min_students >= 1", name="ck_lab_works_min_students_positive"),
         CheckConstraint("max_students >= 1", name="ck_lab_works_max_students_positive"),
         CheckConstraint("max_students >= min_students", name="ck_lab_works_max_gte_min"),
+        CheckConstraint("hours_to_complete >= 1", name="ck_lab_works_hours_positive"),
+        UniqueConstraint("subject_id", "order_number", name="uq_lab_work_subject_order"),
     )
 
     subject: Mapped["Subject"] = relationship(back_populates="lab_works")
