@@ -1,15 +1,6 @@
 from sqlalchemy import CheckConstraint, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
 from app.db.base import Base
-
-import enum
-from sqlalchemy import Enum as SAEnum
-
-class LabReportStatus(enum.Enum):
-    pending = "pending"
-    submitted = "submitted"
-    accepted = "accepted"
 
 class LabRegistration(Base):
     __tablename__ = "lab_registrations"
@@ -18,8 +9,7 @@ class LabRegistration(Base):
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
     lab_work_id: Mapped[int] = mapped_column(ForeignKey("lab_works.id"), nullable=False)
     audience_slot_id: Mapped[int] = mapped_column(
-        ForeignKey("audience_slots.id"),
-        nullable=False,
+        ForeignKey("audience_slots.id"), nullable=False,
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -29,19 +19,17 @@ class LabRegistration(Base):
             "status IN ('pending', 'approved', 'cancelled', 'attended')",
             name="ck_lab_registrations_status",
         ),
-        UniqueConstraint(
-            "student_id",
-            "lab_work_id",
-            "audience_slot_id",
-            name="uq_student_lab_work_slot",
-        ),
+        UniqueConstraint("student_id", "lab_work_id", "audience_slot_id",
+                         name="uq_student_lab_work_slot"),
     )
 
     student: Mapped["Student"] = relationship(back_populates="lab_registrations")
     lab_work: Mapped["LabWork"] = relationship(back_populates="registrations")
     audience_slot: Mapped["AudienceSlot"] = relationship(back_populates="lab_registrations")
 
-    report_status: Mapped["LabReportStatus | None"] = relationship(
+    # ИСПРАВЛЕНО: был сломанный relationship на Python enum LabReportStatus
+    # Теперь → реальная ORM-модель LabReport
+    report: Mapped["LabReport | None"] = relationship(
         back_populates="lab_registration",
         cascade="all, delete-orphan",
         uselist=False,

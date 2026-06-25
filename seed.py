@@ -1,4 +1,3 @@
-from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models import Group, Student, Subject, LabWork
 
@@ -27,13 +26,15 @@ def seed():
         group2.subjects.extend([subj1, subj3])
 
         students = [
-            Student(full_name="Ivan Petrov", group=group1),
-            Student(full_name="Anna Sidorova", group=group1),
-            Student(full_name="Pavel Smirnov", group=group2),
+            # BUG FIX: full_name= → last_name=, first_name=
+            Student(last_name="Petrov", first_name="Ivan", group=group1),
+            Student(last_name="Sidorova", first_name="Anna", group=group1),
+            Student(last_name="Smirnov", first_name="Pavel", group=group2),
         ]
 
         session.add_all([group1, group2, subj1, subj2, subj3, *students])
         session.commit()
+        print("Seed completed successfully.")
 
 if __name__ == "__main__":
     seed()
