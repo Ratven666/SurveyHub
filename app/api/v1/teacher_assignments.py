@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.api.deps import DbSession
-from app.models import TeacherAssignment
+from app.models import Group, Subject, Teacher, TeacherAssignment
 
 router = APIRouter(prefix="/teacher-assignments", tags=["teacher-assignments"])
 
@@ -20,6 +20,16 @@ class TeacherAssignmentRead(BaseModel):
     subject_id: int
 
     model_config = {"from_attributes": True}
+
+
+def _check_refs(teacher_id: int, group_id: int, subject_id: int, db: DbSession) -> None:
+    """Проверяет существование всех трёх связанных сущностей."""
+    if not db.get(Teacher, teacher_id):
+        raise HTTPException(status_code=404, detail=f"Teacher {teacher_id} not found")
+    if not db.get(Group, group_id):
+        raise HTTPException(status_code=404, detail=f"Group {group_id} not found")
+    if not db.get(Subject, subject_id):
+        raise HTTPException(status_code=404, detail=f"Subject {subject_id} not found")
 
 
 @router.get("/", response_model=list[TeacherAssignmentRead])
@@ -41,6 +51,7 @@ def list_assignments(
 
 @router.post("/", response_model=TeacherAssignmentRead, status_code=201)
 def create_assignment(data: TeacherAssignmentCreate, db: DbSession):
+    _check_refs(data.teacher_id, data.group_id, data.subject_id, db)
     assignment = TeacherAssignment(**data.model_dump())
     db.add(assignment)
     db.commit()
