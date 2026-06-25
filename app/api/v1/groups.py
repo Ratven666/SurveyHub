@@ -47,8 +47,6 @@ def delete_group(group_id: int, db: DbSession):
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    # Удаляем строки из group_subject_association через Core —
-    # надёжно, без lazy-load
     db.execute(
         group_subject_association.delete().where(
             group_subject_association.c.group_id == group_id

@@ -1,4 +1,4 @@
-from sqlalchemy import String, Text
+from sqlalchemy import String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -9,9 +9,16 @@ class Subject(Base):
     __tablename__ = "subjects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)          # unique убран
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     training_direction: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "name", "description", "training_direction",
+            name="uq_subject_name_description_direction",
+        ),
+    )
 
     groups: Mapped[list["Group"]] = relationship(
         secondary=group_subject_association,
