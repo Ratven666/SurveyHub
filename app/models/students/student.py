@@ -34,6 +34,23 @@ class Student(Base):
         cascade="all, delete-orphan",
     )
 
+    # Записи, которые студент создал сам
+    created_registrations: Mapped[list["AudienceRegistration"]] = relationship(
+        back_populates="creator",
+        foreign_keys="AudienceRegistration.creator_id",
+    )
+
+    # Все записи, в которых студент участвует (M2M)
+    student_registration_links: Mapped[list["StudentRegistration"]] = relationship(
+        back_populates="student",
+        cascade="all, delete-orphan",
+    )
+    students: Mapped[list["AudienceRegistration"]] = relationship(
+        secondary="student_registrations",
+        back_populates="students",
+        viewonly=True,
+    )
+
     @property
     def full_name(self) -> str:
         parts = [self.last_name, self.first_name]

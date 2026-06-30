@@ -4,19 +4,17 @@ from app.models.labs_subjects.equipment import Equipment
 from app.models.labs_subjects.equipment_units import EquipmentUnit
 from app.models.students.group import Group
 from app.models.students.group_subject import group_subject_association
-from app.models.students.lab_progress import LabProgress
-from app.models.slots.lab_registrations import LabRegistration
-from app.models.slots.lab_reports import LabReport  # добавлен
 from app.models.labs_subjects.lab_work import LabWork
 from app.models.labs_subjects.lab_work_equipment import LabWorkEquipment
 from app.models.students.student import Student
 from app.models.labs_subjects.subject import Subject
 from app.models.teachers.teacher import Teacher
 from app.models.teachers.teacher_assignment import TeacherAssignment
+from app.models.slots.registration_equipment import RegistrationEquipment
 
 __all__ = [
     "AudienceRegistration", "AudienceSlot", "Equipment", "EquipmentUnit",
-    "Group", "LabProgress", "LabRegistration", "LabReport", "LabWork",
+    "Group", "LabWork",
     "LabWorkEquipment", "Student", "Subject", "Teacher", "TeacherAssignment",
-    "group_subject_association",
+    "group_subject_association", "RegistrationEquipment",
 ]

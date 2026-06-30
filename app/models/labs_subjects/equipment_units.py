@@ -34,3 +34,8 @@ class EquipmentUnit(Base):
     )
 
     equipment: Mapped["Equipment"] = relationship(back_populates="units")
+
+    registration_links: Mapped[list["RegistrationEquipment"]] = relationship(
+        back_populates="equipment_unit",
+        # RESTRICT на FK — не удаляем экземпляр пока он числится в регистрации
+    )

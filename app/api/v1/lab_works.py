@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
@@ -6,12 +8,15 @@ from app.models import LabWork, Subject
 
 router = APIRouter(prefix="/lab-works", tags=["lab-works"])
 
+SeatType = Literal["desk", "device"]
+
 
 class LabWorkCreate(BaseModel):
     title: str
     description: str | None = None
     order_number: int = Field(ge=1)
     subject_id: int
+    required_seat_type: SeatType = "desk"
     min_students: int = Field(default=1, ge=1)
     max_students: int = Field(default=1, ge=1)
     hours_to_complete: int = Field(default=2, ge=1)
@@ -28,14 +33,14 @@ class LabWorkUpdate(BaseModel):
     description: str | None = None
     order_number: int | None = Field(default=None, ge=1)
     subject_id: int | None = None
+    required_seat_type: SeatType | None = None
     min_students: int | None = Field(default=None, ge=1)
     max_students: int | None = Field(default=None, ge=1)
     hours_to_complete: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def check_min_max(self) -> "LabWorkUpdate":
-        mn = self.min_students
-        mx = self.max_students
+        mn, mx = self.min_students, self.max_students
         if mn is not None and mx is not None and mx < mn:
             raise ValueError("max_students must be >= min_students")
         return self
@@ -47,6 +52,7 @@ class LabWorkRead(BaseModel):
     description: str | None
     order_number: int
     subject_id: int
+    required_seat_type: str
     min_students: int
     max_students: int
     hours_to_complete: int
@@ -67,11 +73,17 @@ def _check_subject_exists(subject_id: int, db: DbSession) -> None:
 
 
 @router.get("/", response_model=list[LabWorkRead])
-def list_lab_works(db: DbSession, subject_id: int | None = None):
+def list_lab_works(
+    db: DbSession,
+    subject_id: int | None = None,
+    required_seat_type: SeatType | None = None,
+):
     q = db.query(LabWork)
     if subject_id is not None:
         _check_subject_exists(subject_id, db)
         q = q.filter(LabWork.subject_id == subject_id)
+    if required_seat_type is not None:
+        q = q.filter(LabWork.required_seat_type == required_seat_type)
     return q.order_by(LabWork.subject_id, LabWork.order_number).all()
 
 
@@ -95,11 +107,9 @@ def update_lab_work(lab_work_id: int, data: LabWorkUpdate, db: DbSession):
     lab_work = _get_lab_work_or_404(lab_work_id, db)
     updates = data.model_dump(exclude_unset=True)
 
-    # Проверка существования нового предмета если subject_id меняется
     if "subject_id" in updates:
         _check_subject_exists(updates["subject_id"], db)
 
-    # Проверяем min/max с учётом текущих значений в БД
     new_min = updates.get("min_students", lab_work.min_students)
     new_max = updates.get("max_students", lab_work.max_students)
     if new_max < new_min:
