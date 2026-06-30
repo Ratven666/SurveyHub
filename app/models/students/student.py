@@ -8,44 +8,31 @@ class Student(Base):
     __tablename__ = "students"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     middle_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
     student_card_number: Mapped[str | None] = mapped_column(
         String(50), nullable=True, unique=True
     )
     chip_card_number: Mapped[str | None] = mapped_column(
         String(50), nullable=True, unique=True
     )
-
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), nullable=False)
 
     group: Mapped["Group"] = relationship(back_populates="students")
 
-    audience_registrations: Mapped[list["AudienceRegistration"]] = relationship(
-        back_populates="student",
-        cascade="all, delete-orphan",
-    )
-
-    lab_registrations: Mapped[list["LabRegistration"]] = relationship(
-        back_populates="student",
-        cascade="all, delete-orphan",
-    )
-
-    # Записи, которые студент создал сам
-    created_registrations: Mapped[list["AudienceRegistration"]] = relationship(
+    # Записи, которые студент создал (он — организатор)
+    created_registrations: Mapped[list["LabWorksRegistration"]] = relationship(
         back_populates="creator",
-        foreign_keys="AudienceRegistration.creator_id",
+        foreign_keys="LabWorksRegistration.creator_id",
     )
 
-    # Все записи, в которых студент участвует (M2M)
-    student_registration_links: Mapped[list["StudentRegistration"]] = relationship(
+    # M2M — все записи на лабы, в которых студент участвует
+    registration_links: Mapped[list["StudentRegistration"]] = relationship(
         back_populates="student",
         cascade="all, delete-orphan",
     )
-    students: Mapped[list["AudienceRegistration"]] = relationship(
+    lab_works_registrations: Mapped[list["LabWorksRegistration"]] = relationship(
         secondary="student_registrations",
         back_populates="students",
         viewonly=True,

@@ -1,19 +1,18 @@
-# app/models/slots/audience_registrations.py
-
 from sqlalchemy import CheckConstraint, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
 
-class AudienceRegistration(Base):
+class LabWorksRegistration(Base):
     """
     Запись на лабораторную работу в конкретный слот аудитории.
-    - creator_id  — студент, создавший запись (обязателен)
+
+    - creator_id  — студент, создавший запись (организатор)
     - students    — все участники включая создателя (M2M через StudentRegistration)
     """
 
-    __tablename__ = "audience_registrations"
+    __tablename__ = "lab_works_registrations"
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
@@ -25,7 +24,7 @@ class AudienceRegistration(Base):
         nullable=False,
         comment="Лабораторная работа, на которую открыта запись",
     )
-    creator_id: Mapped[int] = mapped_column(       # ← создатель записи
+    creator_id: Mapped[int] = mapped_column(
         ForeignKey("students.id", ondelete="RESTRICT"),
         nullable=False,
         comment="Студент, создавший запись",
@@ -45,39 +44,37 @@ class AudienceRegistration(Base):
     __table_args__ = (
         CheckConstraint(
             "seat_type IN ('desk', 'device')",
-            name="ck_audience_registrations_seat_type",
+            name="ck_lab_works_registrations_seat_type",
         ),
         CheckConstraint(
             "status IN ('pending', 'confirmed', 'cancelled', 'missed', 'violated')",
-            name="ck_audience_registrations_status",
+            name="ck_lab_works_registrations_status",
         ),
         UniqueConstraint(
             "slot_id", "lab_work_id",
-            name="uq_audience_registration_slot_lab",
+            name="uq_lab_works_registration_slot_lab",
         ),
     )
 
     slot: Mapped["AudienceSlot"] = relationship(back_populates="registrations")
-    lab_work: Mapped["LabWork"] = relationship(back_populates="audience_registrations")
+    lab_work: Mapped["LabWork"] = relationship(back_populates="lab_works_registrations")
 
-    # Создатель записи — прямой доступ без JOIN через association
     creator: Mapped["Student"] = relationship(
         back_populates="created_registrations",
         foreign_keys=[creator_id],
     )
 
-    # M2M — все участники (включая создателя)
     student_links: Mapped[list["StudentRegistration"]] = relationship(
-        back_populates="audience_registration",
+        back_populates="lab_works_registration",
         cascade="all, delete-orphan",
     )
     students: Mapped[list["Student"]] = relationship(
         secondary="student_registrations",
-        back_populates="audience_registrations",
+        back_populates="lab_works_registrations",
         viewonly=True,
     )
 
     equipment_links: Mapped[list["RegistrationEquipment"]] = relationship(
-        back_populates="audience_registration",
+        back_populates="lab_works_registration",
         cascade="all, delete-orphan",
     )

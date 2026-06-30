@@ -1,307 +1,381 @@
 """
-seed.py — заполнение БД тестовыми данными.
+seed.py — заполнение БД тестовыми данными для SurveyHub.
 
-Запуск:   python seed.py
-Повторный запуск безопасен: данные уже существуют → выходим с сообщением.
+Запуск:
+    python seed.py                                             # sqlite
+    DATABASE_URL=postgresql+psycopg2://u:p@localhost/db python seed.py
+
+Идемпотентен: повторный запуск не создаёт дублей.
 """
+from __future__ import annotations
 
-from app.db.session import SessionLocal
+import logging
+import os
+import sys
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from app.db.base import Base
 from app.models import (
-    AudienceRegistration,
     AudienceSlot,
     Equipment,
     EquipmentUnit,
     Group,
-    LabProgress,
-    LabRegistration,
-    LabReport,
     LabWork,
     LabWorkEquipment,
+    LabWorksRegistration,
+    RegistrationEquipment,
     Student,
+    StudentRegistration,
     Subject,
     Teacher,
     TeacherAssignment,
+    group_subject_association,
+)
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
+log = logging.getLogger("seed")
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    echo=False,
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Вспомогательные функции
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
-def _already_seeded(session) -> bool:
-    """Возвращает True, если в БД уже есть хотя бы одна группа."""
-    return session.query(Group).first() is not None
+def _get_or_create(session: Session, model, defaults: dict | None = None, **kwargs):
+    obj = session.query(model).filter_by(**kwargs).first()
+    if obj:
+        return obj, False
+    obj = model(**{**kwargs, **(defaults or {})})
+    session.add(obj)
+    session.flush()
+    return obj, True
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Главная функция
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# sections
+# ──────────────────────────────────────────────────────────────────────────────
 
-def seed() -> None:
-    with SessionLocal() as session:
-        if _already_seeded(session):
-            print("Seed skipped: database already contains data.")
+def seed_groups(session: Session) -> list[Group]:
+    groups = []
+    for name in ["ГИС-21", "ГИС-22", "ИВТ-21"]:
+        g, created = _get_or_create(session, Group, name=name)
+        if created:
+            log.info("  + Group: %s", name)
+        groups.append(g)
+    return groups
+
+
+def seed_subjects(session: Session) -> list[Subject]:
+    data = [
+        ("Геоинформационные системы",      "Теория и практика работы с ГИС",          "09.03.02"),
+        ("Дистанционное зондирование Земли","Обработка спутниковых снимков",            "09.03.02"),
+        ("Геодезия",                        "Методы полевых геодезических измерений",  "21.03.03"),
+    ]
+    subjects = []
+    for name, desc, direction in data:
+        s, created = _get_or_create(
+            session, Subject,
+            name=name, description=desc, training_direction=direction,
+        )
+        if created:
+            log.info("  + Subject: %s", name)
+        subjects.append(s)
+    return subjects
+
+
+def seed_teachers(session: Session) -> list[Teacher]:
+    data = [
+        ("Иванов",   "Пётр",  "Сергеевич",   "ivanov@edu.ru",   "Кафедра ГИС", "Доцент"),
+        ("Сидорова", "Анна",  "Владимировна", "sidorova@edu.ru", "Кафедра ГИС", "Старший преподаватель"),
+    ]
+    teachers = []
+    for last, first, middle, email, dept, pos in data:
+        t, created = _get_or_create(
+            session, Teacher, email=email,
+            defaults=dict(last_name=last, first_name=first, middle_name=middle,
+                          department=dept, position=pos),
+        )
+        if created:
+            log.info("  + Teacher: %s %s", last, first)
+        teachers.append(t)
+    return teachers
+
+
+def seed_equipment(session: Session) -> tuple[list[Equipment], list[EquipmentUnit]]:
+    catalog = [
+        ("Нивелир Leica NA720", "Оптический нивелир", [
+            ("Нивелир №1", "LEI-001", "INV-0001"),
+            ("Нивелир №2", "LEI-002", "INV-0002"),
+            ("Нивелир №3", "LEI-003", "INV-0003"),
+        ]),
+        ("Тахеометр Sokkia CX-105", "Электронный тахеометр", [
+            ("Тахеометр №1", "SOK-001", "INV-0010"),
+            ("Тахеометр №2", "SOK-002", "INV-0011"),
+        ]),
+        ("GPS-приёмник Trimble R2", "GNSS-приёмник", [
+            ("GPS №1", "TRM-001", "INV-0020"),
+        ]),
+    ]
+    all_eq, all_units = [], []
+    for eq_name, eq_desc, units in catalog:
+        eq, created = _get_or_create(session, Equipment, name=eq_name,
+                                     defaults={"description": eq_desc})
+        if created:
+            log.info("  + Equipment: %s", eq_name)
+        all_eq.append(eq)
+        for u_name, serial, inv in units:
+            unit, u_created = _get_or_create(
+                session, EquipmentUnit, serial_number=serial,
+                defaults=dict(equipment_id=eq.id, name=u_name,
+                              inventory_number=inv, status="working"),
+            )
+            if u_created:
+                log.info("    + EquipmentUnit: %s", u_name)
+            all_units.append(unit)
+    return all_eq, all_units
+
+
+def seed_students(session: Session, groups: list[Group]) -> list[Student]:
+    rows = [
+        # g_idx, last, first, middle, card, chip
+        (0, "Петров",    "Алексей",    "Михайлович",    "СТ-2021-001", "CHIP-001"),
+        (0, "Кузнецова", "Мария",      "Андреевна",     "СТ-2021-002", "CHIP-002"),
+        (0, "Васильев",  "Дмитрий",   "Олегович",      "СТ-2021-003", "CHIP-003"),
+        (1, "Морозова",  "Екатерина", "Сергеевна",     "СТ-2022-001", "CHIP-004"),
+        (1, "Новиков",   "Иван",       "Павлович",      "СТ-2022-002", "CHIP-005"),
+        (1, "Лебедева",  "Ольга",      "Викторовна",    "СТ-2022-003", "CHIP-006"),
+        (2, "Соколов",   "Артём",      "Игоревич",      "СТ-2021-101", "CHIP-007"),
+        (2, "Попова",    "Наталья",   "Дмитриевна",    "СТ-2021-102", "CHIP-008"),
+        (2, "Фёдоров",   "Никита",    "Александрович", "СТ-2021-103", "CHIP-009"),
+    ]
+    students = []
+    for g_idx, last, first, middle, card, chip in rows:
+        s, created = _get_or_create(
+            session, Student, student_card_number=card,
+            defaults=dict(last_name=last, first_name=first, middle_name=middle,
+                          chip_card_number=chip, group_id=groups[g_idx].id),
+        )
+        if created:
+            log.info("  + Student: %s %s", last, first)
+        students.append(s)
+    return students
+
+
+def seed_group_subject_links(session, groups, subjects) -> None:
+    links = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 2)]
+    for g_idx, s_idx in links:
+        if subjects[s_idx] not in groups[g_idx].subjects:
+            groups[g_idx].subjects.append(subjects[s_idx])
+            log.info("  + GroupSubject: %s → %s",
+                     groups[g_idx].name, subjects[s_idx].name)
+    session.flush()
+
+
+def seed_teacher_assignments(session, teachers, groups, subjects):
+    rows = [(0, 0, 0), (0, 1, 0), (1, 0, 1), (1, 2, 2)]
+    assignments = []
+    for t_i, g_i, s_i in rows:
+        ta, created = _get_or_create(
+            session, TeacherAssignment,
+            teacher_id=teachers[t_i].id,
+            group_id=groups[g_i].id,
+            subject_id=subjects[s_i].id,
+        )
+        if created:
+            log.info("  + TeacherAssignment: %s → %s / %s",
+                     teachers[t_i].last_name, groups[g_i].name, subjects[s_i].name)
+        assignments.append(ta)
+    return assignments
+
+
+def seed_lab_works(session, subjects, all_eq) -> list[LabWork]:
+    rows = [
+        # s_idx, order, title, seat_type, min_s, max_s, hours
+        (0, 1, "Введение в QGIS. Интерфейс и базовые операции",  "device", 1, 1, 2),
+        (0, 2, "Работа с векторными слоями и атрибутами",         "device", 1, 2, 2),
+        (0, 3, "Пространственный анализ. Оверлейные операции",    "device", 1, 2, 4),
+        (1, 1, "Загрузка и визуализация растровых снимков",        "device", 1, 1, 2),
+        (1, 2, "Классификация объектов на снимке",                 "device", 1, 2, 4),
+        (2, 1, "Нивелирование трассы замкнутого хода",            "desk",   2, 3, 4),
+        (2, 2, "Тахеометрическая съёмка участка",                 "desk",   2, 3, 4),
+    ]
+    eq_map = {
+        (2, 1): [(0, 2)],
+        (2, 2): [(1, 1)],
+    }
+    lab_works = []
+    for s_idx, order, title, seat_type, min_s, max_s, hours in rows:
+        lw, created = _get_or_create(
+            session, LabWork,
+            subject_id=subjects[s_idx].id, order_number=order,
+            defaults=dict(title=title, required_seat_type=seat_type,
+                          min_students=min_s, max_students=max_s,
+                          hours_to_complete=hours),
+        )
+        if created:
+            log.info("  + LabWork [%s] #%d: %s", subjects[s_idx].name, order, title)
+        if created and (s_idx, order) in eq_map:
+            for eq_idx, req in eq_map[(s_idx, order)]:
+                lwe = LabWorkEquipment(
+                    lab_work_id=lw.id,
+                    equipment_id=all_eq[eq_idx].id,
+                    required_units=req,
+                )
+                session.add(lwe)
+                session.flush()
+                log.info("    + LabWorkEquipment: %s ×%d", all_eq[eq_idx].name, req)
+        lab_works.append(lw)
+    return lab_works
+
+
+def seed_audience_slots(session) -> list[AudienceSlot]:
+    rows = [
+        # audience_number, weekday, pair, desk, device
+        ("301А",  1, 1, 15, 10),
+        ("301А",  1, 2, 15, 10),
+        ("301А",  3, 1, 15, 10),
+        ("Б-201", 1, 3,  0, 20),
+        ("Б-201", 2, 2,  0, 20),
+        ("205",   2, 1, 20,  0),
+        ("205",   4, 1, 20,  0),
+    ]
+    slots = []
+    for audience_number, weekday, pair, desk, device in rows:
+        s, created = _get_or_create(
+            session, AudienceSlot,
+            audience_number=audience_number, weekday=weekday, pair_number=pair,
+            defaults=dict(desk_capacity=desk, device_capacity=device),
+        )
+        if created:
+            log.info("  + AudienceSlot: %s день=%d пара=%d (столы=%d, ПК=%d)",
+                     audience_number, weekday, pair, desk, device)
+        slots.append(s)
+    return slots
+
+
+def seed_lab_works_registrations(
+    session, slots, lab_works, students, all_units,
+) -> None:
+    """
+    reg_0 — слот 301А пн.1, ГИС Л1 (device)
+             создатель: Петров; участники: Петров (confirmed) + Кузнецова (pending)
+
+    reg_1 — слот Б-201 вт.2, ДЗЗ Л1 (device)
+             создатель: Морозова; участники: Морозова + Новиков (оба confirmed)
+
+    reg_2 — слот 205 вт.1, Геодезия Л1 (desk)
+             создатель: Соколов; участники: Соколов + Попова + Фёдоров
+             оборудование: Нивелир №1, Нивелир №2
+    """
+
+    def _make_reg(slot, lab_work, creator, seat_type, status,
+                  participants, units=None):
+        existing = (
+            session.query(LabWorksRegistration)
+            .filter_by(slot_id=slot.id, lab_work_id=lab_work.id)
+            .first()
+        )
+        if existing:
             return
-
-        # ── Группы ────────────────────────────────────────────────────────────
-        group_ms101 = Group(name="MS-101")
-        group_ms102 = Group(name="MS-102")
-        session.add_all([group_ms101, group_ms102])
-        session.flush()  # получаем id до создания зависимых объектов
-
-        # ── Предметы ──────────────────────────────────────────────────────────
-        subj_surveying = Subject(
-            name="Mine Surveying",
-            description="Basic mine surveying course",
-            training_direction="21.05.04",
+        reg = LabWorksRegistration(
+            slot_id=slot.id,
+            lab_work_id=lab_work.id,
+            creator_id=creator.id,
+            seat_type=seat_type,
+            status=status,
         )
-        subj_geodesy = Subject(
-            name="Geodesy",
-            description="Geodetic foundations",
-            training_direction="21.05.04",
-        )
-        subj_gis = Subject(
-            name="GIS",
-            description="Introduction to GIS",
-            training_direction="21.05.04",
-        )
-        session.add_all([subj_surveying, subj_geodesy, subj_gis])
+        session.add(reg)
         session.flush()
-
-        # ── M2M: группа ↔ предмет ─────────────────────────────────────────────
-        group_ms101.subjects.extend([subj_surveying, subj_geodesy])
-        group_ms102.subjects.extend([subj_surveying, subj_gis])
+        for student, st_status in participants:
+            session.add(StudentRegistration(
+                student_id=student.id,
+                lab_works_registration_id=reg.id,
+                status=st_status,
+            ))
+        if units:
+            for unit in units:
+                session.add(RegistrationEquipment(
+                    lab_works_registration_id=reg.id,
+                    equipment_unit_id=unit.id,
+                ))
         session.flush()
+        log.info(
+            "  + LabWorksRegistration #%d: %s → %s (%d участников%s)",
+            reg.id, slot.audience_number, lab_work.title,
+            len(participants),
+            f", {len(units)} ед. оборудования" if units else "",
+        )
 
-        # ── Преподаватели ─────────────────────────────────────────────────────
-        teacher_ivanov = Teacher(
-            last_name="Ivanov",
-            first_name="Sergey",
-            middle_name="Petrovich",
-            email="ivanov@univ.ru",
-            department="Mine Surveying Dept.",
-            position="Associate Professor",
-        )
-        teacher_kuznetsova = Teacher(
-            last_name="Kuznetsova",
-            first_name="Elena",
-            middle_name="Vladimirovna",
-            email="kuznetsova@univ.ru",
-            department="Geodesy Dept.",
-            position="Senior Lecturer",
-        )
-        session.add_all([teacher_ivanov, teacher_kuznetsova])
-        session.flush()
+    _make_reg(
+        slot=slots[0], lab_work=lab_works[0],
+        creator=students[0], seat_type="device", status="pending",
+        participants=[(students[0], "confirmed"), (students[1], "pending")],
+    )
+    _make_reg(
+        slot=slots[4], lab_work=lab_works[3],
+        creator=students[3], seat_type="device", status="confirmed",
+        participants=[(students[3], "confirmed"), (students[4], "confirmed")],
+    )
+    _make_reg(
+        slot=slots[5], lab_work=lab_works[5],
+        creator=students[6], seat_type="desk", status="pending",
+        participants=[
+            (students[6], "confirmed"),
+            (students[7], "pending"),
+            (students[8], "pending"),
+        ],
+        units=all_units[:2],  # Нивелир №1, Нивелир №2
+    )
 
-        # ── Назначения преподавателей ─────────────────────────────────────────
-        session.add_all([
-            TeacherAssignment(
-                teacher=teacher_ivanov, group=group_ms101, subject=subj_surveying
-            ),
-            TeacherAssignment(
-                teacher=teacher_ivanov, group=group_ms102, subject=subj_surveying
-            ),
-            TeacherAssignment(
-                teacher=teacher_kuznetsova, group=group_ms101, subject=subj_geodesy
-            ),
-            TeacherAssignment(
-                teacher=teacher_kuznetsova, group=group_ms102, subject=subj_gis
-            ),
-        ])
-        session.flush()
 
-        # ── Оборудование ──────────────────────────────────────────────────────
-        equip_level = Equipment(
-            name="Digital Level",
-            description="Leica NA730 digital leveling instrument",
-        )
-        equip_total = Equipment(
-            name="Total Station",
-            description="Leica TS06 5'' total station",
-        )
-        equip_gnss = Equipment(
-            name="GNSS Receiver",
-            description="Trimble R8s GNSS receiver",
-        )
-        session.add_all([equip_level, equip_total, equip_gnss])
-        session.flush()
+# ──────────────────────────────────────────────────────────────────────────────
+# main
+# ──────────────────────────────────────────────────────────────────────────────
 
-        # ── Экземпляры оборудования ───────────────────────────────────────────
-        session.add_all([
-            EquipmentUnit(
-                equipment=equip_level,
-                name="Нивелир №1",
-                serial_number="SN-LVL-001",
-                inventory_number="INV-2024-001",
-                status="working",
-            ),
-            EquipmentUnit(
-                equipment=equip_level,
-                name="Нивелир №2",
-                serial_number="SN-LVL-002",
-                inventory_number="INV-2024-002",
-                status="working",
-            ),
-            EquipmentUnit(
-                equipment=equip_total,
-                name="Тахеометр №1",
-                serial_number="SN-TS-001",
-                inventory_number="INV-2024-003",
-                status="working",
-            ),
-            EquipmentUnit(
-                equipment=equip_total,
-                name="Тахеометр №2",
-                serial_number="SN-TS-002",
-                inventory_number="INV-2024-004",
-                status="repair",  # намеренно — для проверки фильтров
-            ),
-            EquipmentUnit(
-                equipment=equip_gnss,
-                name="GNSS-приёмник №1",
-                serial_number="SN-GPS-001",
-                inventory_number="INV-2024-005",
-                status="working",
-            ),
-        ])
-        session.flush()
+def run() -> None:
+    log.info("=== SurveyHub seed start | %s ===", DATABASE_URL)
+    Base.metadata.create_all(engine)
 
-        # ── Лабораторные работы ───────────────────────────────────────────────
-        lw_traverse = LabWork(
-            title="Traverse computation",
-            order_number=1,
-            description="Calculation and adjustment of a closed traverse",
-            subject=subj_surveying,
-            required_seat_type="desk",
-            min_students=1, max_students=2,
-            hours_to_complete=2,
-        )
-        lw_leveling = LabWork(
-            title="Leveling network",
-            order_number=2,
-            description="Field leveling practice using digital levels",
-            subject=subj_surveying,
-            required_seat_type="device",
-            min_students=2, max_students=3,
-            hours_to_complete=4,
-        )
-        lw_adjustment = LabWork(
-            title="Coordinate adjustment",
-            order_number=1,
-            description="Least squares adjustment of geodetic network",
-            subject=subj_geodesy,
-            required_seat_type="desk",
-            min_students=1, max_students=1,
-            hours_to_complete=2,
-        )
-        lw_qgis = LabWork(
-            title="QGIS basics",
-            order_number=1,
-            description="Working with layers, styles, and attribute tables",
-            subject=subj_gis,
-            required_seat_type="device",
-            min_students=1, max_students=1,
-            hours_to_complete=2,
-        )
-        lw_joins = LabWork(
-            title="Spatial joins",
-            order_number=2,
-            description="Vector analysis and spatial join operations",
-            subject=subj_gis,
-            required_seat_type="device",
-            min_students=1, max_students=1,
-            hours_to_complete=2,
-        )
-        session.add_all([lw_traverse, lw_leveling, lw_adjustment, lw_qgis, lw_joins])
-        session.flush()
+    with Session(engine) as session:
+        try:
+            log.info("-- groups")
+            groups = seed_groups(session)
+            log.info("-- subjects")
+            subjects = seed_subjects(session)
+            log.info("-- teachers")
+            teachers = seed_teachers(session)
+            log.info("-- equipment + units")
+            all_eq, all_units = seed_equipment(session)
+            log.info("-- students")
+            students = seed_students(session, groups)
+            log.info("-- group ↔ subject links")
+            seed_group_subject_links(session, groups, subjects)
+            log.info("-- teacher assignments")
+            seed_teacher_assignments(session, teachers, groups, subjects)
+            log.info("-- lab works")
+            lab_works = seed_lab_works(session, subjects, all_eq)
+            log.info("-- audience slots")
+            slots = seed_audience_slots(session)
+            log.info("-- lab works registrations")
+            seed_lab_works_registrations(session, slots, lab_works, students, all_units)
 
-        # ── Привязка оборудования к лаб. работам ──────────────────────────────
-        session.add_all([
-            LabWorkEquipment(lab_work=lw_leveling, equipment=equip_level, required_units=1),
-            LabWorkEquipment(lab_work=lw_leveling, equipment=equip_total, required_units=1),
-            LabWorkEquipment(lab_work=lw_adjustment, equipment=equip_gnss, required_units=1),
-        ])
-        session.flush()
-
-        # ── Студенты ──────────────────────────────────────────────────────────
-        petrov = Student(
-            last_name="Petrov", first_name="Ivan", middle_name="Alexandrovich",
-            student_card_number="SC-2024-001", chip_card_number="CHIP-001",
-            group=group_ms101,
-        )
-        sidorova = Student(
-            last_name="Sidorova", first_name="Anna", middle_name="Dmitrievna",
-            student_card_number="SC-2024-002", chip_card_number="CHIP-002",
-            group=group_ms101,
-        )
-        smirnov = Student(
-            last_name="Smirnov", first_name="Pavel", middle_name="Nikolaevich",
-            student_card_number="SC-2024-003", chip_card_number="CHIP-003",
-            group=group_ms102,
-        )
-        kozlov = Student(
-            last_name="Kozlov", first_name="Dmitry", middle_name="Igorevich",
-            student_card_number="SC-2024-004", chip_card_number="CHIP-004",
-            group=group_ms102,
-        )
-        session.add_all([petrov, sidorova, smirnov, kozlov])
-        session.flush()
-
-        # ── Слоты аудиторий ───────────────────────────────────────────────────
-        # weekday: 1=Пн, 2=Вт, 3=Ср, 4=Чт, 5=Пт   |   pair: 1..5
-        slot_mon_p1 = AudienceSlot(weekday=1, pair_number=1, desk_capacity=20, device_capacity=10)
-        slot_mon_p2 = AudienceSlot(weekday=1, pair_number=2, desk_capacity=20, device_capacity=10)
-        slot_wed_p3 = AudienceSlot(weekday=3, pair_number=3, desk_capacity=15, device_capacity=5)
-        slot_thu_p2 = AudienceSlot(weekday=4, pair_number=2, desk_capacity=15, device_capacity=8)
-        session.add_all([slot_mon_p1, slot_mon_p2, slot_wed_p3, slot_thu_p2])
-        session.flush()
-
-        # ── Записи в аудиторию ────────────────────────────────────────────────
-        session.add_all([
-            AudienceRegistration(student=petrov,   slot=slot_mon_p1, seat_type="desk"),
-            AudienceRegistration(student=sidorova, slot=slot_mon_p1, seat_type="desk"),
-            AudienceRegistration(student=smirnov,  slot=slot_wed_p3, seat_type="device"),
-            AudienceRegistration(student=kozlov,   slot=slot_wed_p3, seat_type="device"),
-        ])
-        session.flush()
-
-        # ── Записи на лабораторные работы ─────────────────────────────────────
-        reg_petrov_traverse   = LabRegistration(student=petrov,   lab_work=lw_traverse,  audience_slot=slot_mon_p1, status="approved")
-        reg_sidorova_traverse = LabRegistration(student=sidorova, lab_work=lw_traverse,  audience_slot=slot_mon_p1, status="approved")
-        reg_petrov_leveling   = LabRegistration(student=petrov,   lab_work=lw_leveling,  audience_slot=slot_mon_p2, status="pending")
-        reg_smirnov_qgis      = LabRegistration(student=smirnov,  lab_work=lw_qgis,      audience_slot=slot_wed_p3, status="approved")
-        reg_kozlov_qgis       = LabRegistration(student=kozlov,   lab_work=lw_qgis,      audience_slot=slot_wed_p3, status="approved")
-        reg_smirnov_joins     = LabRegistration(student=smirnov,  lab_work=lw_joins,     audience_slot=slot_thu_p2, status="pending")
-        session.add_all([
-            reg_petrov_traverse, reg_sidorova_traverse, reg_petrov_leveling,
-            reg_smirnov_qgis, reg_kozlov_qgis, reg_smirnov_joins,
-        ])
-        session.flush()
-
-        # ── Прогресс выполнения ───────────────────────────────────────────────
-        session.add_all([
-            LabProgress(lab_registration=reg_petrov_traverse,   status="defended",    note="Защищена на отлично."),
-            LabProgress(lab_registration=reg_sidorova_traverse, status="submitted",   note="Отчёт сдан, ожидает проверки."),
-            LabProgress(lab_registration=reg_smirnov_qgis,      status="in_progress", note=None),
-        ])
-        session.flush()
-
-        # ── Отчёты ────────────────────────────────────────────────────────────
-        session.add_all([
-            LabReport(lab_registration=reg_petrov_traverse,   status="accepted",  comment="Все расчёты верны. Оценка: отлично."),
-            LabReport(lab_registration=reg_sidorova_traverse, status="submitted", comment=None),
-        ])
-
-        session.commit()
-        print("Seed completed successfully.")
-        print(f"  Groups:    {session.query(Group).count()}")
-        print(f"  Subjects:  {session.query(Subject).count()}")
-        print(f"  Teachers:  {session.query(Teacher).count()}")
-        print(f"  Students:  {session.query(Student).count()}")
-        print(f"  LabWorks:  {session.query(LabWork).count()}")
-        print(f"  Slots:     {session.query(AudienceSlot).count()}")
-        print(f"  LabRegs:   {session.query(LabRegistration).count()}")
+            session.commit()
+            log.info("=== seed completed successfully ===")
+        except Exception as exc:
+            session.rollback()
+            log.exception("seed FAILED: %s", exc)
+            raise
 
 
 if __name__ == "__main__":
-    seed()
+    run()

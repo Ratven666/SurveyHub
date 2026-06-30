@@ -51,7 +51,7 @@ class LabWork(Base):
         cascade="all, delete-orphan",
     )
 
-    registrations: Mapped[list["LabRegistration"]] = relationship(
+    lab_works_registrations: Mapped[list["LabWorksRegistration"]] = relationship(
         back_populates="lab_work",
         cascade="all, delete-orphan",
     )
